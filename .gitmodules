@@ -1,0 +1,3 @@
+[submodule "hh-applicant-tool"]
+	path = hh-applicant-tool
+	url = https://github.com/KOVALSKl/hh-applicant-tool.git
