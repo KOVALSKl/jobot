@@ -1,7 +1,8 @@
+"""Обработчики аутентификации HH: вход, выход, профиль, управление токенами."""
+
 from __future__ import annotations
 
 import time
-from io import BytesIO
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -9,9 +10,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from bot.auth_manager import AuthManager
-from bot.hh_service import HHService
+from bot.decorators import require_auth
 from bot.keyboards import cancel_kb, logout_confirm, main_menu, password_choice
+from bot.services.auth import AuthService
 from bot.states import AuthStates
+from bot.texts import t
 
 router = Router()
 
@@ -21,10 +24,10 @@ router = Router()
 @router.message(F.text == "🔑 Войти в HH")
 @router.message(Command("login"))
 async def login_start(message: Message, state: FSMContext) -> None:
+    """Запускает процесс входа в HH через Playwright."""
     await state.set_state(AuthStates.waiting_for_username)
     await message.answer(
-        "👤 <b>Вход в аккаунт HH</b>\n\n"
-        "Введите ваш email или номер телефона:",
+        t("auth.login_prompt"),
         parse_mode="HTML",
         reply_markup=cancel_kb(),
     )
@@ -32,16 +35,16 @@ async def login_start(message: Message, state: FSMContext) -> None:
 
 @router.message(AuthStates.waiting_for_username)
 async def login_username_received(message: Message, state: FSMContext) -> None:
+    """Валидирует имя пользователя и предлагает выбор способа входа."""
     username = message.text.strip()
     if not username or len(username) < 3:
-        await message.answer("❌ Введите корректный email или телефон.")
+        await message.answer(t("auth.invalid_username"))
         return
 
     await state.update_data(username=username)
     await state.set_state(AuthStates.waiting_for_password_choice)
     await message.answer(
-        f"📧 Логин: <code>{username}</code>\n\n"
-        "Выберите способ входа:",
+        t("auth.login_confirm", username=username),
         parse_mode="HTML",
         reply_markup=password_choice(),
     )
@@ -49,14 +52,15 @@ async def login_username_received(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "auth_otp")
 async def login_otp(
-    callback: CallbackQuery, state: FSMContext, auth: AuthManager
+    callback: CallbackQuery, state: FSMContext, auth_manager: AuthManager
 ) -> None:
+    """Инициирует вход через OTP с использованием Playwright."""
     await callback.answer()
     data = await state.get_data()
     username = data.get("username", "")
 
     await state.set_state(AuthStates.auth_in_progress)
-    await callback.message.edit_text("⏳ Начинаю авторизацию...")
+    await callback.message.edit_text(t("auth.starting"))
 
     async def send_text(text: str) -> None:
         try:
@@ -80,7 +84,7 @@ async def login_otp(
         except Exception:
             pass
 
-    await auth.start_login(
+    await auth_manager.start_login(
         user_id=callback.from_user.id,
         username=username,
         password=None,
@@ -94,19 +98,17 @@ async def login_otp(
 async def login_password_start(
     callback: CallbackQuery, state: FSMContext
 ) -> None:
+    """Запрашивает пароль для входа в HH."""
     await callback.answer()
     await state.set_state(AuthStates.waiting_for_password)
-    await callback.message.edit_text(
-        "🔒 Введите пароль от аккаунта HH:\n\n"
-        "<i>Сообщение с паролем будет удалено после обработки.</i>",
-        parse_mode="HTML",
-    )
+    await callback.message.edit_text(t("auth.password_prompt"), parse_mode="HTML")
 
 
 @router.message(AuthStates.waiting_for_password)
 async def login_password_received(
-    message: Message, state: FSMContext, auth: AuthManager
+    message: Message, state: FSMContext, auth_manager: AuthManager
 ) -> None:
+    """Обрабатывает пароль и запускает Playwright-сессию входа."""
     password = message.text.strip()
 
     try:
@@ -115,7 +117,7 @@ async def login_password_received(
         pass
 
     if not password:
-        await message.answer("❌ Пароль не может быть пустым.")
+        await message.answer(t("auth.empty_password"))
         return
 
     data = await state.get_data()
@@ -145,7 +147,7 @@ async def login_password_received(
         except Exception:
             pass
 
-    await auth.start_login(
+    await auth_manager.start_login(
         user_id=message.from_user.id,
         username=username,
         password=password,
@@ -157,27 +159,27 @@ async def login_password_received(
 
 @router.message(AuthStates.auth_in_progress)
 async def auth_input_handler(
-    message: Message, state: FSMContext, auth: AuthManager, hh: HHService
+    message: Message, state: FSMContext, auth_manager: AuthManager, auth_service: AuthService
 ) -> None:
-    """Перехватывает ввод пользователя (код/капча) во время авторизации."""
+    """Передаёт ввод пользователя (OTP-код / капча) в активную сессию авторизации."""
     text = message.text.strip() if message.text else ""
 
     if text.lower() in ("/cancel", "отмена"):
-        await auth.cancel(message.from_user.id)
+        await auth_manager.cancel(message.from_user.id)
         await state.clear()
-        await message.answer("❌ Авторизация отменена.")
+        await message.answer(t("auth.cancelled"))
         return
 
-    provided = await auth.provide_input(message.from_user.id, text)
+    provided = await auth_manager.provide_input(message.from_user.id, text)
     if not provided:
         await state.clear()
-        if hh.is_authenticated(message.from_user.id):
+        if auth_service.is_authenticated(message.from_user.id):
             await message.answer(
-                "✅ Вы авторизованы! Выберите действие:",
+                t("auth.already_authenticated"),
                 reply_markup=main_menu(),
             )
         else:
-            await message.answer("Сессия авторизации завершена. Попробуйте /login")
+            await message.answer(t("auth.session_ended"))
 
 
 # ── Fallback: login via tokens ───────────────────────────────────────
@@ -185,16 +187,10 @@ async def auth_input_handler(
 @router.message(F.text == "🔐 Войти через токены")
 @router.message(Command("login_tokens"))
 async def login_tokens_start(message: Message, state: FSMContext) -> None:
+    """Запрашивает ручной ввод access/refresh токенов."""
     await state.set_state(AuthStates.waiting_for_tokens)
     await message.answer(
-        "🔐 <b>Авторизация через токены</b>\n\n"
-        "Отправьте токены в формате (каждый на новой строке):\n"
-        "<code>access_token</code>\n"
-        "<code>refresh_token</code>\n\n"
-        "<b>Как получить:</b>\n"
-        "1. <code>hh-applicant-tool auth</code>\n"
-        "2. <code>hh-applicant-tool config</code>\n"
-        "3. Скопируйте access_token и refresh_token",
+        t("auth.tokens_prompt"),
         parse_mode="HTML",
         reply_markup=cancel_kb(),
     )
@@ -202,72 +198,66 @@ async def login_tokens_start(message: Message, state: FSMContext) -> None:
 
 @router.message(AuthStates.waiting_for_tokens)
 async def login_tokens_receive(
-    message: Message, state: FSMContext, hh: HHService
+    message: Message, state: FSMContext, auth_service: AuthService
 ) -> None:
     lines = [line.strip() for line in message.text.strip().split("\n") if line.strip()]
     if len(lines) < 2:
-        await message.answer(
-            "❌ Нужно 2 строки: access_token и refresh_token.\nПопробуйте ещё раз."
-        )
+        await message.answer(t("auth.tokens_invalid_format"))
         return
 
     access_token = lines[0]
     refresh_token = lines[1]
 
     if not access_token.startswith("USER"):
-        await message.answer("❌ access_token должен начинаться с 'USER'.")
+        await message.answer(t("auth.tokens_invalid_prefix"))
         return
 
     expires_at = int(time.time()) + 14 * 24 * 3600
-    hh.save_tokens(message.from_user.id, access_token, refresh_token, expires_at)
+    auth_service.save_tokens(message.from_user.id, access_token, refresh_token, expires_at)
 
     try:
-        info = await hh.whoami(message.from_user.id)
+        info = await auth_service.whoami(message.from_user.id)
         await state.clear()
         await message.answer(
-            f"✅ Авторизация успешна!\n\n{info}",
+            t("auth.tokens_success", info=info),
             reply_markup=main_menu(),
             parse_mode="HTML",
         )
     except Exception as ex:
-        hh.logout(message.from_user.id)
-        await message.answer(f"❌ Не удалось авторизоваться: {ex}")
+        auth_service.logout(message.from_user.id)
+        await message.answer(t("auth.tokens_failed", error=ex))
 
 
 # ── Whoami ───────────────────────────────────────────────────────────
 
 @router.message(Command("whoami"))
 @router.message(F.text == "👤 Профиль")
-async def cmd_whoami(message: Message, hh: HHService) -> None:
-    if not hh.is_authenticated(message.from_user.id):
-        await message.answer("⚠️ Вы не авторизованы. Используйте /start")
-        return
-
-    wait_msg = await message.answer("⏳ Загрузка профиля...")
+@require_auth
+async def cmd_whoami(message: Message, auth_service: AuthService) -> None:
+    """Отображает информацию о текущем профиле HH."""
+    wait_msg = await message.answer(t("auth.loading_profile"))
     try:
-        info = await hh.whoami(message.from_user.id)
+        info = await auth_service.whoami(message.from_user.id)
         await wait_msg.edit_text(info, parse_mode="HTML")
     except Exception as ex:
-        await wait_msg.edit_text(f"❌ Ошибка: {ex}")
+        await wait_msg.edit_text(t("common.error", error=ex))
 
 
 # ── Logout ───────────────────────────────────────────────────────────
 
 @router.message(Command("logout"))
-async def cmd_logout(message: Message, hh: HHService) -> None:
-    if not hh.is_authenticated(message.from_user.id):
-        await message.answer("Вы и так не авторизованы.")
-        return
-    await message.answer(
-        "Вы уверены, что хотите выйти?", reply_markup=logout_confirm()
-    )
+@require_auth
+async def cmd_logout(message: Message, auth_service: AuthService) -> None:
+    """Запрашивает подтверждение выхода из аккаунта."""
+    await message.answer(t("auth.logout_confirm"), reply_markup=logout_confirm())
 
 
 @router.callback_query(F.data == "logout_yes")
 async def logout_confirm_cb(
-    callback: CallbackQuery, hh: HHService, state: FSMContext
+    callback: CallbackQuery, auth_service: AuthService, state: FSMContext
 ) -> None:
-    hh.logout(callback.from_user.id)
+    """Выполняет выход из аккаунта после подтверждения."""
+    auth_service.logout(callback.from_user.id)
     await state.clear()
-    await callback.message.edit_text("✅ Вы вышли из аккаунта.")
+    await callback.message.edit_text(t("auth.logged_out"))
     await callback.answer()

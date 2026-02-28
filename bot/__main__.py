@@ -4,15 +4,7 @@ import asyncio
 import logging
 import sys
 
-from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
-
-from bot.auth_manager import AuthManager
-from bot.config import config
-from bot.handlers import apply, auth, negotiations, resumes, start
-from bot.hh_service import HHService
+from bot.app import create_bot, create_dispatcher
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,27 +15,19 @@ logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
-    bot = Bot(
-        token=config.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
-    dp = Dispatcher(storage=MemoryStorage())
+    bot = create_bot()
+    dp = create_dispatcher()
 
-    hh = HHService(data_dir=config.data_dir)
-    auth_manager = AuthManager(hh_service=hh)
+    @dp.startup()
+    async def on_startup() -> None:
+        me = await bot.me()
+        logger.info("Bot started: @%s [%s]", me.username, me.id)
 
-    dp.include_routers(
-        start.router,
-        auth.router,
-        resumes.router,
-        apply.router,
-        negotiations.router,
-    )
+    @dp.shutdown()
+    async def on_shutdown() -> None:
+        logger.info("Bot shutting down...")
+        await bot.session.close()
 
-    dp["hh"] = hh
-    dp["auth"] = auth_manager
-
-    logger.info("Bot starting...")
     await dp.start_polling(bot)
 
 

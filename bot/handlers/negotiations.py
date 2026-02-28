@@ -1,3 +1,5 @@
+"""Обработчики откликов: просмотр, очистка, ответы работодателям, обновление токена и прямые API-вызовы."""
+
 from __future__ import annotations
 
 from aiogram import F, Router
@@ -5,9 +7,13 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from bot.hh_service import HHService
+from bot.decorators import require_auth
 from bot.keyboards import cancel_kb, clear_options
+from bot.services.api import ApiService
+from bot.services.auth import AuthService
+from bot.services.negotiation import NegotiationService
 from bot.states import ClearStates, ReplyStates
+from bot.texts import t
 
 router = Router()
 
@@ -16,31 +22,26 @@ router = Router()
 
 @router.message(Command("negotiations"))
 @router.message(F.text == "📊 Мои отклики")
-async def cmd_negotiations(message: Message, hh: HHService) -> None:
-    if not hh.is_authenticated(message.from_user.id):
-        await message.answer("⚠️ Вы не авторизованы. Используйте /start")
-        return
-
-    wait_msg = await message.answer("⏳ Загрузка откликов...")
+@require_auth
+async def cmd_negotiations(message: Message, auth_service: AuthService, negotiation_service: NegotiationService) -> None:
+    """Отображает агрегированную статистику откликов."""
+    wait_msg = await message.answer(t("negotiations.loading"))
     try:
-        text = await hh.get_negotiations_summary(message.from_user.id)
+        text = await negotiation_service.get_summary(message.from_user.id)
         await wait_msg.edit_text(text, parse_mode="HTML")
     except Exception as ex:
-        await wait_msg.edit_text(f"❌ Ошибка: {ex}")
+        await wait_msg.edit_text(t("common.error", error=ex))
 
 
 # ── Clear negotiations ────────────────────────────────────────────────
 
 @router.message(Command("clear"))
 @router.message(F.text == "🗑️ Очистить отклики")
-async def cmd_clear(message: Message, hh: HHService) -> None:
-    if not hh.is_authenticated(message.from_user.id):
-        await message.answer("⚠️ Вы не авторизованы. Используйте /start")
-        return
-
+@require_auth
+async def cmd_clear(message: Message, auth_service: AuthService) -> None:
+    """Отображает меню параметров очистки откликов."""
     await message.answer(
-        "🗑️ <b>Очистка откликов</b>\n\n"
-        "Выберите, что удалить:",
+        t("negotiations.clear_prompt"),
         reply_markup=clear_options(),
         parse_mode="HTML",
     )
@@ -48,10 +49,11 @@ async def cmd_clear(message: Message, hh: HHService) -> None:
 
 @router.callback_query(F.data == "clear_discards")
 async def clear_discards(
-    callback: CallbackQuery, hh: HHService, state: FSMContext
+    callback: CallbackQuery, negotiation_service: NegotiationService, state: FSMContext
 ) -> None:
+    """Удаляет все отклики со статусом 'отклонено'."""
     await callback.answer()
-    msg = await callback.message.edit_text("🗑️ Удаляю отказы...")
+    msg = await callback.message.edit_text(t("negotiations.clearing_discards"))
 
     async def progress(text: str) -> None:
         try:
@@ -60,38 +62,39 @@ async def clear_discards(
             pass
 
     try:
-        await hh.clear_negotiations(
+        await negotiation_service.clear(
             callback.from_user.id, callback=progress
         )
     except Exception as ex:
-        await msg.edit_text(f"❌ Ошибка: {ex}")
+        await msg.edit_text(t("common.error", error=ex))
 
 
 @router.callback_query(F.data == "clear_older")
 async def clear_older_start(
     callback: CallbackQuery, state: FSMContext
 ) -> None:
+    """Запрашивает количество дней неактивности для очистки."""
     await callback.answer()
     await state.set_state(ClearStates.waiting_for_days)
     await callback.message.edit_text(
-        "📅 Введите количество дней.\n"
-        "Будут удалены отклики, не обновлявшиеся дольше указанного срока.",
+        t("negotiations.days_prompt"),
         reply_markup=cancel_kb(),
     )
 
 
 @router.message(ClearStates.waiting_for_days)
 async def clear_older_days(
-    message: Message, state: FSMContext, hh: HHService
+    message: Message, state: FSMContext, negotiation_service: NegotiationService
 ) -> None:
+    """Парсит количество дней и очищает старые отклики."""
     try:
         days = int(message.text.strip())
     except ValueError:
-        await message.answer("❌ Введите число.")
+        await message.answer(t("common.invalid_number"))
         return
 
     await state.clear()
-    msg = await message.answer(f"🗑️ Удаляю отклики старше {days} дней...")
+    msg = await message.answer(t("negotiations.clearing_older", days=days))
 
     async def progress(text: str) -> None:
         try:
@@ -100,35 +103,22 @@ async def clear_older_days(
             pass
 
     try:
-        await hh.clear_negotiations(
+        await negotiation_service.clear(
             message.from_user.id, callback=progress, older_than=days
         )
     except Exception as ex:
-        await msg.edit_text(f"❌ Ошибка: {ex}")
+        await msg.edit_text(t("common.error", error=ex))
 
 
 # ── Reply employers ──────────────────────────────────────────────────
 
 @router.message(Command("reply"))
 @router.message(F.text == "💬 Ответить работодателям")
-async def cmd_reply(message: Message, hh: HHService, state: FSMContext) -> None:
-    if not hh.is_authenticated(message.from_user.id):
-        await message.answer("⚠️ Вы не авторизованы. Используйте /start")
-        return
-
+async def cmd_reply(message: Message, auth_service: AuthService, state: FSMContext) -> None:
+    """Запрашивает шаблон сообщения для ответа работодателям."""
     await state.set_state(ReplyStates.waiting_for_message)
     await message.answer(
-        "💬 <b>Ответ работодателям</b>\n\n"
-        "Бот отправит сообщение во все чаты, "
-        "где есть непрочитанный ответ работодателя.\n\n"
-        "Введите шаблон сообщения:\n\n"
-        "Плейсхолдеры:\n"
-        "<code>%(vacancy_name)s</code> — вакансия\n"
-        "<code>%(employer_name)s</code> — работодатель\n"
-        "<code>%(first_name)s</code> — ваше имя\n\n"
-        "Пример:\n"
-        "<code>Здравствуйте! Спасибо за ответ по вакансии "
-        "%(vacancy_name)s. Готов обсудить детали.</code>",
+        t("negotiations.reply_prompt"),
         parse_mode="HTML",
         reply_markup=cancel_kb(),
     )
@@ -136,15 +126,16 @@ async def cmd_reply(message: Message, hh: HHService, state: FSMContext) -> None:
 
 @router.message(ReplyStates.waiting_for_message)
 async def reply_message_received(
-    message: Message, state: FSMContext, hh: HHService
+    message: Message, state: FSMContext, negotiation_service: NegotiationService
 ) -> None:
+    """Отправляет ответы на все непрочитанные сообщения работодателей."""
     reply_text = message.text.strip()
     if not reply_text:
-        await message.answer("❌ Сообщение не может быть пустым.")
+        await message.answer(t("common.empty_message"))
         return
 
     await state.clear()
-    msg = await message.answer("💬 Рассылаю ответы...")
+    msg = await message.answer(t("negotiations.replying"))
 
     async def progress(text: str) -> None:
         try:
@@ -153,47 +144,37 @@ async def reply_message_received(
             pass
 
     try:
-        await hh.reply_employers(
+        await negotiation_service.reply_employers(
             message.from_user.id, callback=progress, reply_message=reply_text
         )
     except Exception as ex:
-        await msg.edit_text(f"❌ Ошибка: {ex}")
+        await msg.edit_text(t("common.error", error=ex))
 
 
 # ── Refresh Token ────────────────────────────────────────────────────
 
 @router.message(Command("refresh"))
 @router.message(F.text == "🔄 Обновить токен")
-async def cmd_refresh(message: Message, hh: HHService) -> None:
-    if not hh.is_authenticated(message.from_user.id):
-        await message.answer("⚠️ Вы не авторизованы. Используйте /start")
-        return
-
-    wait_msg = await message.answer("⏳ Проверяю токен...")
+@require_auth
+async def cmd_refresh(message: Message, auth_service: AuthService) -> None:
+    """Обновляет access-токен HH API, если он истёк."""
+    wait_msg = await message.answer(t("token.checking"))
     try:
-        text = await hh.refresh_token(message.from_user.id)
+        text = await auth_service.refresh_token(message.from_user.id)
         await wait_msg.edit_text(text)
     except Exception as ex:
-        await wait_msg.edit_text(f"❌ Ошибка обновления токена: {ex}")
+        await wait_msg.edit_text(t("token.refresh_error", error=ex))
 
 
 # ── Call API ──────────────────────────────────────────────────────────
 
 @router.message(Command("api"))
-async def cmd_api(message: Message, hh: HHService) -> None:
-    if not hh.is_authenticated(message.from_user.id):
-        await message.answer("⚠️ Вы не авторизованы. Используйте /start")
-        return
-
+@require_auth
+async def cmd_api(message: Message, auth_service: AuthService, api_service: ApiService) -> None:
+    """Выполняет прямой вызов к HH API (GET по умолчанию)."""
     parts = message.text.split(maxsplit=2)
     if len(parts) < 2:
-        await message.answer(
-            "Использование: <code>/api /endpoint [key=value ...]</code>\n\n"
-            "Примеры:\n"
-            "<code>/api /me</code>\n"
-            "<code>/api /employers text=IT</code>",
-            parse_mode="HTML",
-        )
+        await message.answer(t("api.usage"), parse_mode="HTML")
         return
 
     endpoint = parts[1]
@@ -204,13 +185,13 @@ async def cmd_api(message: Message, hh: HHService) -> None:
                 k, v = pair.split("=", 1)
                 params[k] = v
 
-    wait_msg = await message.answer("⏳ Запрос к API...")
+    wait_msg = await message.answer(t("api.loading"))
     try:
-        result = await hh.call_api(
+        result = await api_service.call_api(
             message.from_user.id, "GET", endpoint, **params
         )
         await wait_msg.edit_text(
             f"<pre>{result}</pre>", parse_mode="HTML"
         )
     except Exception as ex:
-        await wait_msg.edit_text(f"❌ Ошибка: {ex}")
+        await wait_msg.edit_text(t("common.error", error=ex))

@@ -1,3 +1,5 @@
+"""Обработчики массового отклика на похожие вакансии."""
+
 from __future__ import annotations
 
 from aiogram import F, Router
@@ -5,26 +7,24 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from bot.hh_service import HHService
+from bot.decorators import require_auth
 from bot.keyboards import apply_confirm, apply_options, cancel_kb
+from bot.services.apply import ApplyService
+from bot.services.auth import AuthService
 from bot.states import ApplyStates
+from bot.texts import t
 
 router = Router()
 
 
 @router.message(Command("apply"))
 @router.message(F.text == "🚀 Рассылка откликов")
-async def cmd_apply(message: Message, hh: HHService, state: FSMContext) -> None:
-    if not hh.is_authenticated(message.from_user.id):
-        await message.answer("⚠️ Вы не авторизованы. Используйте /start")
-        return
-
+@require_auth
+async def cmd_apply(message: Message, auth_service: AuthService, state: FSMContext) -> None:
+    """Отображает меню выбора режима отклика."""
     await state.clear()
     await message.answer(
-        "🚀 <b>Рассылка откликов</b>\n\n"
-        "Утилита откликнется на все подходящие вакансии "
-        "со всех опубликованных резюме.\n\n"
-        "Выберите режим:",
+        t("apply.start_prompt"),
         reply_markup=apply_options(),
         parse_mode="HTML",
     )
@@ -32,25 +32,22 @@ async def cmd_apply(message: Message, hh: HHService, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "apply_default")
 async def apply_default(
-    callback: CallbackQuery, hh: HHService, state: FSMContext
+    callback: CallbackQuery, apply_service: ApplyService, state: FSMContext
 ) -> None:
+    """Запускает отклик с настройками по умолчанию (без поискового фильтра)."""
     await callback.answer()
-    await _run_apply(callback.message, callback.from_user.id, hh, state)
+    await _run_apply(callback.message, callback.from_user.id, apply_service, state)
 
 
 @router.callback_query(F.data == "apply_search")
 async def apply_search_start(
     callback: CallbackQuery, state: FSMContext
 ) -> None:
+    """Запрашивает поисковый запрос для вакансий."""
     await callback.answer()
     await state.set_state(ApplyStates.waiting_for_search)
     await callback.message.edit_text(
-        "🔍 Введите поисковый запрос для вакансий.\n\n"
-        "Примеры:\n"
-        "• <code>Python backend</code>\n"
-        "• <code>(Go OR Golang) NOT PHP</code>\n"
-        "• <code>DevOps инженер</code>\n\n"
-        "Отправьте <code>-</code> чтобы пропустить.",
+        t("apply.search_prompt"),
         parse_mode="HTML",
         reply_markup=cancel_kb(),
     )
@@ -58,15 +55,12 @@ async def apply_search_start(
 
 @router.message(ApplyStates.waiting_for_search)
 async def apply_search_received(message: Message, state: FSMContext) -> None:
+    """Сохраняет поисковый запрос и запрашивает исключающие термины."""
     search = message.text.strip() if message.text.strip() != "-" else None
     await state.update_data(search=search)
     await state.set_state(ApplyStates.waiting_for_excluded)
     await message.answer(
-        "🚫 Укажите исключаемые слова через запятую.\n\n"
-        "Вакансии, содержащие эти слова в названии или описании, "
-        "будут пропущены.\n\n"
-        "Пример: <code>fullstack, junior, php, bitrix</code>\n\n"
-        "Отправьте <code>-</code> чтобы пропустить.",
+        t("apply.excluded_prompt"),
         parse_mode="HTML",
         reply_markup=cancel_kb(),
     )
@@ -74,21 +68,14 @@ async def apply_search_received(message: Message, state: FSMContext) -> None:
 
 @router.message(ApplyStates.waiting_for_excluded)
 async def apply_excluded_received(message: Message, state: FSMContext) -> None:
+    """Сохраняет исключающие термины и запрашивает шаблон сопроводительного письма."""
     excluded = (
         message.text.strip() if message.text.strip() != "-" else None
     )
     await state.update_data(excluded=excluded)
     await state.set_state(ApplyStates.waiting_for_message)
     await message.answer(
-        "✉️ Введите шаблон сопроводительного письма (необязательно).\n\n"
-        "Доступные плейсхолдеры:\n"
-        "<code>%(vacancy_name)s</code> — название вакансии\n"
-        "<code>%(employer_name)s</code> — работодатель\n"
-        "<code>%(first_name)s</code> — ваше имя\n"
-        "<code>%(last_name)s</code> — фамилия\n"
-        "<code>%(resume_title)s</code> — название резюме\n\n"
-        "Рандомизация: <code>{Привет|Здравствуйте}</code>\n\n"
-        "Отправьте <code>-</code> чтобы пропустить.",
+        t("apply.message_prompt"),
         parse_mode="HTML",
         reply_markup=cancel_kb(),
     )
@@ -96,8 +83,9 @@ async def apply_excluded_received(message: Message, state: FSMContext) -> None:
 
 @router.message(ApplyStates.waiting_for_message)
 async def apply_message_received(
-    message: Message, state: FSMContext, hh: HHService
+    message: Message, state: FSMContext, apply_service: ApplyService
 ) -> None:
+    """Сохраняет шаблон сопроводительного письма и отображает сводку для подтверждения."""
     msg_template = (
         message.text.strip() if message.text.strip() != "-" else None
     )
@@ -124,15 +112,16 @@ async def apply_message_received(
 
 @router.callback_query(F.data == "apply_go")
 async def apply_go(
-    callback: CallbackQuery, hh: HHService, state: FSMContext
+    callback: CallbackQuery, apply_service: ApplyService, state: FSMContext
 ) -> None:
+    """Подтверждает и запускает процесс отклика."""
     await callback.answer()
     data = await state.get_data()
     await state.clear()
     await _run_apply(
         callback.message,
         callback.from_user.id,
-        hh,
+        apply_service,
         state,
         search=data.get("search"),
         excluded=data.get("excluded"),
@@ -143,16 +132,14 @@ async def apply_go(
 async def _run_apply(
     message: Message,
     user_id: int,
-    hh: HHService,
+    apply_service: ApplyService,
     state: FSMContext,
     search: str | None = None,
     excluded: str | None = None,
     message_template: str | None = None,
 ) -> None:
-    status_msg = await message.edit_text(
-        "🚀 Рассылка откликов запущена...\n"
-        "Это может занять несколько минут."
-    )
+    """Выполняет цикл отклика на похожие вакансии и транслирует прогресс."""
+    status_msg = await message.edit_text(t("apply.running"))
 
     async def progress(text: str) -> None:
         try:
@@ -161,7 +148,7 @@ async def _run_apply(
             pass
 
     try:
-        await hh.apply_similar(
+        await apply_service.apply_similar(
             user_id,
             callback=progress,
             search=search,
@@ -169,4 +156,4 @@ async def _run_apply(
             message_template=message_template,
         )
     except Exception as ex:
-        await status_msg.edit_text(f"❌ Ошибка при рассылке: {ex}")
+        await status_msg.edit_text(t("apply.error", error=ex))
