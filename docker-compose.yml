@@ -1,12 +1,53 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: hh-bot-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=hh_bot
+      - POSTGRES_USER=hh_bot
+      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
+      - TZ=Europe/Moscow
+    secrets:
+      - postgres_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hh_bot -d hh_bot"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
   hh-bot:
     build: .
     container_name: hh-bot
     restart: unless-stopped
-    env_file:
-      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - ./data:/app/data
     environment:
       - DATA_DIR=/app/data
+      - STORAGE_BACKEND=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=hh_bot
+      - DB_USER=hh_bot
       - TZ=Europe/Moscow
+    secrets:
+      - postgres_password
+      - encryption_key
+      - bot_token
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password
+  encryption_key:
+    file: ./secrets/encryption_key
+  bot_token:
+    file: ./secrets/bot_token
+
+volumes:
+  pg_data:

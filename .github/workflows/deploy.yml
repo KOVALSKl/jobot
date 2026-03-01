@@ -16,9 +16,28 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: POSTGRES_PASSWORD,BOT_TOKEN,ENCRYPTION_KEY
           script: |
             cd /opt/jobot
             git pull origin main
             git submodule update --init --recursive
-            docker compose up -d --build --remove-orphans
+
+            install -d -m 700 ./secrets
+            printf "%s" "$POSTGRES_PASSWORD" > ./secrets/postgres_password
+            printf "%s" "$BOT_TOKEN" > ./secrets/bot_token
+            printf "%s" "$ENCRYPTION_KEY" > ./secrets/encryption_key
+            chmod 600 ./secrets/postgres_password ./secrets/bot_token ./secrets/encryption_key
+
+            docker compose up -d postgres
+            until docker compose exec -T postgres pg_isready -U hh_bot -d hh_bot; do
+              sleep 2
+            done
+
+            docker compose build hh-bot
+            docker compose run --rm hh-bot alembic upgrade head
+            docker compose up -d --remove-orphans hh-bot
             docker image prune -f
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}

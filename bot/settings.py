@@ -4,14 +4,35 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
+
+from bot.security.secrets import get_secret
 
 load_dotenv()
 
 STORAGE_BACKEND: str = os.getenv("STORAGE_BACKEND", "filesystem")
-DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 DATA_DIR: Path = Path(os.getenv("DATA_DIR", "./data"))
+DB_HOST: str = os.getenv("DB_HOST", "localhost")
+DB_PORT: str = os.getenv("DB_PORT", "5432")
+DB_NAME: str = os.getenv("DB_NAME", "hh_bot")
+DB_USER: str = os.getenv("DB_USER", "hh_bot")
+
+
+def _build_database_url() -> str:
+    """Собирает DATABASE_URL из env или DB_* + secret с паролем."""
+    explicit_url = os.getenv("DATABASE_URL", "")
+    if explicit_url:
+        return explicit_url
+    password = get_secret("postgres_password", env_name="DB_PASSWORD")
+    if not password:
+        return ""
+    escaped = quote_plus(password)
+    return f"postgresql+asyncpg://{DB_USER}:{escaped}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+
+DATABASE_URL: str = _build_database_url()
 
 
 def create_storage() -> "StorageConnector":

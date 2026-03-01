@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Text, func
+from sqlalchemy import BigInteger, DateTime, Integer, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -22,6 +22,7 @@ class UserConfig(Base):
 
     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     config_data: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
+    enc_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -36,6 +37,7 @@ class UserCookies(Base):
 
     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     cookies_text: Mapped[str] = mapped_column(Text, nullable=False)
+    enc_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

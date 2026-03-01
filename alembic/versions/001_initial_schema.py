@@ -30,6 +30,7 @@ def upgrade() -> None:
             nullable=False,
             server_default="{}",
         ),
+        sa.Column("enc_version", sa.Integer(), nullable=False, server_default="1"),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
@@ -43,6 +44,7 @@ def upgrade() -> None:
         "user_cookies",
         sa.Column("user_id", sa.BigInteger(), nullable=False),
         sa.Column("cookies_text", sa.Text(), nullable=False),
+        sa.Column("enc_version", sa.Integer(), nullable=False, server_default="1"),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
