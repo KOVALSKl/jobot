@@ -17,11 +17,10 @@ class AuthService(BaseService):
 
     def is_authenticated(self, user_id: int) -> bool:
         """Проверяет наличие действующего access-токена у пользователя."""
-        cfg_file = self._config_path(user_id)
-        if not cfg_file.exists():
+        if not self.storage.config_exists(user_id):
             return False
         try:
-            cfg = self._get_config(user_id)
+            cfg = self.storage.load_config(user_id)
             return bool(cfg.get("token", {}).get("access_token"))
         except Exception:
             return False
@@ -33,14 +32,12 @@ class AuthService(BaseService):
         refresh_token: str,
         expires_at: int,
     ) -> None:
-        """Сохраняет OAuth-токены в конфигурационный файл пользователя."""
-        self._config_dir(user_id).mkdir(parents=True, exist_ok=True)
-        cfg = self._get_config(user_id)
-        cfg.save(token={
+        """Сохраняет OAuth-токены через коннектор хранилища."""
+        self.storage.save_config(user_id, {"token": {
             "access_token": access_token,
             "refresh_token": refresh_token,
             "access_expires_at": expires_at,
-        })
+        }})
 
     def get_oauth_url(self, user_id: int) -> str:
         """Возвращает URL авторизации HH OAuth."""
@@ -61,12 +58,7 @@ class AuthService(BaseService):
 
     def logout(self, user_id: int) -> None:
         """Удаляет сохранённые токены пользователя."""
-        cfg_file = self._config_path(user_id)
-        if not cfg_file.exists():
-            return
-        cfg = self._get_config(user_id)
-        cfg.pop("token", None)
-        cfg.save()
+        self.storage.delete_config_key(user_id, "token")
 
     # ── Async ─────────────────────────────────────────────────────────
 

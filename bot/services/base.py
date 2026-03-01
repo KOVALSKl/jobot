@@ -6,11 +6,12 @@ import asyncio
 from collections.abc import Callable, Coroutine
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hh_applicant_tool import HHApplicantTool
-from hh_applicant_tool.utils.config import Config
+
+if TYPE_CHECKING:
+    from bot.storage.protocol import StorageConnector
 
 ProgressCallback = Callable[[str], Coroutine[Any, Any, None]]
 
@@ -24,19 +25,14 @@ async def run_sync(func: Callable, *args: Any, **kwargs: Any) -> Any:
 
 
 class BaseService:
-    """Базовый класс доменных сервисов — предоставляет хелперы для конфигурации и инструментов."""
+    """Базовый класс доменных сервисов — работает с хранилищем через StorageConnector."""
 
-    def __init__(self, data_dir: Path) -> None:
-        self.data_dir = data_dir
-
-    def _config_dir(self, user_id: int) -> Path:
-        return self.data_dir / str(user_id)
-
-    def _config_path(self, user_id: int) -> Path:
-        return self._config_dir(user_id) / "config.json"
-
-    def _get_config(self, user_id: int) -> Config:
-        return Config(self._config_path(user_id))
+    def __init__(self, storage: StorageConnector) -> None:
+        self.storage = storage
 
     def _get_tool(self, user_id: int) -> HHApplicantTool:
-        return HHApplicantTool(["--config-dir", str(self._config_dir(user_id))])
+        return HHApplicantTool(
+            ["--config-dir", str(self.storage.get_work_dir(user_id))],
+            config_backend=self.storage.get_config_backend(user_id),
+            cookie_backend=self.storage.get_cookie_backend(user_id),
+        )

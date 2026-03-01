@@ -20,6 +20,7 @@ from bot.services import (
     NegotiationService,
     ResumeService,
 )
+from bot.settings import create_storage
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +35,16 @@ def create_bot() -> Bot:
 def create_dispatcher() -> Dispatcher:
     dp = Dispatcher(storage=MemoryStorage())
 
-    auth_service = AuthService(data_dir=config.data_dir)
+    store = create_storage()
+
+    auth_service = AuthService(storage=store)
     dp["auth_service"] = auth_service
-    dp["resume_service"] = ResumeService(data_dir=config.data_dir)
-    dp["apply_service"] = ApplyService(data_dir=config.data_dir)
-    dp["negotiation_service"] = NegotiationService(data_dir=config.data_dir)
-    dp["api_service"] = ApiService(data_dir=config.data_dir)
+    dp["resume_service"] = ResumeService(storage=store)
+    dp["apply_service"] = ApplyService(storage=store)
+    dp["negotiation_service"] = NegotiationService(storage=store)
+    dp["api_service"] = ApiService(storage=store)
     dp["auth_manager"] = AuthManager(auth_service=auth_service)
+    dp["storage"] = store
 
     dp.message.middleware(AccessControlMiddleware())
     dp.callback_query.middleware(AccessControlMiddleware())
@@ -52,5 +56,16 @@ def create_dispatcher() -> Dispatcher:
         apply.router,
         negotiations.router,
     )
+
+    async def on_startup(bot: Bot) -> None:
+        logger.info("Инициализация хранилища...")
+        await store.init()
+
+    async def on_shutdown(bot: Bot) -> None:
+        logger.info("Закрытие хранилища...")
+        await store.close()
+
+    dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
 
     return dp
