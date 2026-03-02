@@ -224,7 +224,7 @@ class AuthManager:
                     )
                     tool.api_client.handle_access_token(token)
 
-                    self.auth.save_tokens(
+                    await self.auth.save_tokens(
                         user_id,
                         token["access_token"],
                         token["refresh_token"],
@@ -270,4 +270,4 @@ class AuthManager:
             name = c["name"]
             value = c["value"]
             lines.append(f"{domain}\t{flag}\t{path}\t{secure}\t{expires}\t{name}\t{value}\n")
-        self.auth.storage.save_cookies(user_id, "".join(lines))
+        await self.auth.storage.save_cookies(user_id, "".join(lines))

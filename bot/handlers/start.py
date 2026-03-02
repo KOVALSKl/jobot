@@ -20,7 +20,7 @@ async def cmd_start(message: Message, auth_service: AuthService, state: FSMConte
     await state.clear()
     user_id = message.from_user.id
 
-    if auth_service.is_authenticated(user_id):
+    if await auth_service.is_authenticated(user_id):
         await message.answer(t("start.welcome_back"), reply_markup=main_menu())
     else:
         await message.answer(

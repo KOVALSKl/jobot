@@ -114,6 +114,7 @@ async def clear_older_days(
 
 @router.message(Command("reply"))
 @router.message(F.text == "💬 Ответить работодателям")
+@require_auth
 async def cmd_reply(message: Message, auth_service: AuthService, state: FSMContext) -> None:
     """Запрашивает шаблон сообщения для ответа работодателям."""
     await state.set_state(ReplyStates.waiting_for_message)

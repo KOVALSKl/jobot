@@ -13,19 +13,17 @@ logger = logging.getLogger(__name__)
 class AuthService(BaseService):
     """Управление состоянием аутентификации HH: токены, вход, выход, профиль."""
 
-    # ── Sync helpers ──────────────────────────────────────────────────
-
-    def is_authenticated(self, user_id: int) -> bool:
+    async def is_authenticated(self, user_id: int) -> bool:
         """Проверяет наличие действующего access-токена у пользователя."""
-        if not self.storage.config_exists(user_id):
+        if not await self.storage.config_exists(user_id):
             return False
         try:
-            cfg = self.storage.load_config(user_id)
+            cfg = await self.storage.load_config(user_id)
             return bool(cfg.get("token", {}).get("access_token"))
         except Exception:
             return False
 
-    def save_tokens(
+    async def save_tokens(
         self,
         user_id: int,
         access_token: str,
@@ -33,32 +31,37 @@ class AuthService(BaseService):
         expires_at: int,
     ) -> None:
         """Сохраняет OAuth-токены через коннектор хранилища."""
-        self.storage.save_config(user_id, {"token": {
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "access_expires_at": expires_at,
-        }})
+        await self.storage.save_config(
+            user_id,
+            {
+                "token": {
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                    "access_expires_at": expires_at,
+                }
+            },
+        )
 
     def get_oauth_url(self, user_id: int) -> str:
         """Возвращает URL авторизации HH OAuth."""
         tool = self._get_tool(user_id)
         return tool.api_client.oauth_client.authorize_url
 
-    def exchange_code(self, user_id: int, code: str) -> None:
+    async def exchange_code(self, user_id: int, code: str) -> None:
         """Обменивает OAuth-код на токены и сохраняет их."""
         tool = self._get_tool(user_id)
         token = tool.api_client.oauth_client.authenticate(code)
         tool.api_client.handle_access_token(token)
-        self.save_tokens(
+        await self.save_tokens(
             user_id,
             token["access_token"],
             token["refresh_token"],
             token["access_expires_at"],
         )
 
-    def logout(self, user_id: int) -> None:
+    async def logout(self, user_id: int) -> None:
         """Удаляет сохранённые токены пользователя."""
-        self.storage.delete_config_key(user_id, "token")
+        await self.storage.delete_config_key(user_id, "token")
 
     # ── Async ─────────────────────────────────────────────────────────
 

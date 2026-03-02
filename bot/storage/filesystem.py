@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -23,45 +24,66 @@ class FileSystemStorage:
 
     def __init__(self, data_dir: Path) -> None:
         self._data_dir = data_dir
+        self._config_locks: dict[int, asyncio.Lock] = {}
+        self._cookies_locks: dict[int, asyncio.Lock] = {}
+
+    def _get_config_lock(self, user_id: int) -> asyncio.Lock:
+        lock = self._config_locks.get(user_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._config_locks[user_id] = lock
+        return lock
+
+    def _get_cookies_lock(self, user_id: int) -> asyncio.Lock:
+        lock = self._cookies_locks.get(user_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._cookies_locks[user_id] = lock
+        return lock
 
     # ── Config ───────────────────────────────────────────
 
     def _config_backend(self, user_id: int) -> FileConfigBackend:
         return FileConfigBackend(self._data_dir / str(user_id) / "config.json")
 
-    def config_exists(self, user_id: int) -> bool:
-        return self._config_backend(user_id).exists()
+    async def config_exists(self, user_id: int) -> bool:
+        return await asyncio.to_thread(self._config_backend(user_id).exists)
 
-    def load_config(self, user_id: int) -> dict[str, Any]:
-        return self._config_backend(user_id).load()
+    async def load_config(self, user_id: int) -> dict[str, Any]:
+        return await asyncio.to_thread(self._config_backend(user_id).load)
 
-    def save_config(self, user_id: int, data: dict[str, Any]) -> None:
-        backend = self._config_backend(user_id)
-        existing = backend.load() if backend.exists() else {}
-        existing.update(data)
-        backend.save(existing)
+    async def save_config(self, user_id: int, data: dict[str, Any]) -> None:
+        async with self._get_config_lock(user_id):
+            backend = self._config_backend(user_id)
+            existing = await asyncio.to_thread(backend.load) if await asyncio.to_thread(backend.exists) else {}
+            existing.update(data)
+            await asyncio.to_thread(backend.save, existing)
 
-    def delete_config_key(self, user_id: int, key: str) -> None:
-        backend = self._config_backend(user_id)
-        if not backend.exists():
-            return
-        cfg = backend.load()
-        cfg.pop(key, None)
-        backend.save(cfg)
+    async def delete_config_key(self, user_id: int, key: str) -> None:
+        async with self._get_config_lock(user_id):
+            backend = self._config_backend(user_id)
+            if not await asyncio.to_thread(backend.exists):
+                return
+            cfg = await asyncio.to_thread(backend.load)
+            cfg.pop(key, None)
+            await asyncio.to_thread(backend.save, cfg)
 
     # ── Cookies ──────────────────────────────────────────
 
     def _cookie_backend(self, user_id: int) -> FileCookieBackend:
         return FileCookieBackend(self._data_dir / str(user_id) / "cookies.txt")
 
-    def load_cookies(self, user_id: int) -> str | None:
-        path = self._data_dir / str(user_id) / "cookies.txt"
-        if not path.exists():
-            return None
-        return path.read_text(encoding="utf-8")
+    async def load_cookies(self, user_id: int) -> str | None:
+        async with self._get_cookies_lock(user_id):
+            path = self._data_dir / str(user_id) / "cookies.txt"
+            exists = await asyncio.to_thread(path.exists)
+            if not exists:
+                return None
+            return await asyncio.to_thread(path.read_text, encoding="utf-8")
 
-    def save_cookies(self, user_id: int, cookies_text: str) -> None:
-        self._cookie_backend(user_id).save_from_text(cookies_text)
+    async def save_cookies(self, user_id: int, cookies_text: str) -> None:
+        async with self._get_cookies_lock(user_id):
+            await asyncio.to_thread(self._cookie_backend(user_id).save_from_text, cookies_text)
 
     # ── Бэкенды для hh-applicant-tool ────────────────────
 

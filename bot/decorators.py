@@ -19,7 +19,7 @@ def require_auth(func: Any) -> Any:
         auth_service = kwargs["auth_service"]
         user_id = event.from_user.id
 
-        if not auth_service.is_authenticated(user_id):
+        if not await auth_service.is_authenticated(user_id):
             text = t("common.not_authorized")
             if isinstance(event, CallbackQuery):
                 await event.answer(text, show_alert=True)

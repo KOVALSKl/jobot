@@ -173,7 +173,7 @@ async def auth_input_handler(
     provided = await auth_manager.provide_input(message.from_user.id, text)
     if not provided:
         await state.clear()
-        if auth_service.is_authenticated(message.from_user.id):
+        if await auth_service.is_authenticated(message.from_user.id):
             await message.answer(
                 t("auth.already_authenticated"),
                 reply_markup=main_menu(),
@@ -213,7 +213,12 @@ async def login_tokens_receive(
         return
 
     expires_at = int(time.time()) + 14 * 24 * 3600
-    auth_service.save_tokens(message.from_user.id, access_token, refresh_token, expires_at)
+    await auth_service.save_tokens(
+        message.from_user.id,
+        access_token,
+        refresh_token,
+        expires_at,
+    )
 
     try:
         info = await auth_service.whoami(message.from_user.id)
@@ -224,7 +229,7 @@ async def login_tokens_receive(
             parse_mode="HTML",
         )
     except Exception as ex:
-        auth_service.logout(message.from_user.id)
+        await auth_service.logout(message.from_user.id)
         await message.answer(t("auth.tokens_failed", error=ex))
 
 
@@ -257,7 +262,7 @@ async def logout_confirm_cb(
     callback: CallbackQuery, auth_service: AuthService, state: FSMContext
 ) -> None:
     """Выполняет выход из аккаунта после подтверждения."""
-    auth_service.logout(callback.from_user.id)
+    await auth_service.logout(callback.from_user.id)
     await state.clear()
     await callback.message.edit_text(t("auth.logged_out"))
     await callback.answer()

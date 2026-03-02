@@ -20,6 +20,7 @@ from bot.services import (
     NegotiationService,
     ResumeService,
 )
+from bot.services.concurrency import OperationGuard
 from bot.settings import create_storage
 
 logger = logging.getLogger(__name__)
@@ -36,13 +37,16 @@ def create_dispatcher() -> Dispatcher:
     dp = Dispatcher(storage=MemoryStorage())
 
     store = create_storage()
+    operation_guard = OperationGuard()
 
-    auth_service = AuthService(storage=store)
+    auth_service = AuthService(storage=store, operation_guard=operation_guard)
     dp["auth_service"] = auth_service
-    dp["resume_service"] = ResumeService(storage=store)
-    dp["apply_service"] = ApplyService(storage=store)
-    dp["negotiation_service"] = NegotiationService(storage=store)
-    dp["api_service"] = ApiService(storage=store)
+    dp["resume_service"] = ResumeService(storage=store, operation_guard=operation_guard)
+    dp["apply_service"] = ApplyService(storage=store, operation_guard=operation_guard)
+    dp["negotiation_service"] = NegotiationService(
+        storage=store, operation_guard=operation_guard
+    )
+    dp["api_service"] = ApiService(storage=store, operation_guard=operation_guard)
     dp["auth_manager"] = AuthManager(auth_service=auth_service)
     dp["storage"] = store
 
