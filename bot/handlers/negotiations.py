@@ -11,8 +11,10 @@ from bot.decorators import require_auth
 from bot.keyboards import cancel_kb, clear_options
 from bot.services.api import ApiService
 from bot.services.auth import AuthService
+from bot.services.heavy_queue import format_queue_error, schedule_heavy_task
 from bot.services.negotiation import NegotiationService
 from bot.states import ClearStates, ReplyStates
+from bot.settings import HEAVY_TASKS_MODE
 from bot.texts import t
 
 router = Router()
@@ -53,6 +55,24 @@ async def clear_discards(
 ) -> None:
     """Удаляет все отклики со статусом 'отклонено'."""
     await callback.answer()
+    if HEAVY_TASKS_MODE == "celery":
+        try:
+            task = await schedule_heavy_task(
+                user_id=callback.from_user.id,
+                operation="clear",
+                payload={"older_than": None, "blacklist": False},
+            )
+        except Exception as ex:
+            await callback.message.edit_text(format_queue_error(ex))
+            return
+        await callback.message.edit_text(
+            "✅ Очистка поставлена в очередь.\n"
+            f"ID: <code>{task.task_id}</code>\n"
+            "Проверьте прогресс через /status",
+            parse_mode="HTML",
+        )
+        return
+
     msg = await callback.message.edit_text(t("negotiations.clearing_discards"))
 
     async def progress(text: str) -> None:
@@ -94,6 +114,24 @@ async def clear_older_days(
         return
 
     await state.clear()
+    if HEAVY_TASKS_MODE == "celery":
+        try:
+            task = await schedule_heavy_task(
+                user_id=message.from_user.id,
+                operation="clear",
+                payload={"older_than": days, "blacklist": False},
+            )
+        except Exception as ex:
+            await message.answer(format_queue_error(ex))
+            return
+        await message.answer(
+            "✅ Очистка поставлена в очередь.\n"
+            f"ID: <code>{task.task_id}</code>\n"
+            "Проверьте прогресс через /status",
+            parse_mode="HTML",
+        )
+        return
+
     msg = await message.answer(t("negotiations.clearing_older", days=days))
 
     async def progress(text: str) -> None:
@@ -136,6 +174,24 @@ async def reply_message_received(
         return
 
     await state.clear()
+    if HEAVY_TASKS_MODE == "celery":
+        try:
+            task = await schedule_heavy_task(
+                user_id=message.from_user.id,
+                operation="reply",
+                payload={"reply_message": reply_text},
+            )
+        except Exception as ex:
+            await message.answer(format_queue_error(ex))
+            return
+        await message.answer(
+            "✅ Ответы работодателям поставлены в очередь.\n"
+            f"ID: <code>{task.task_id}</code>\n"
+            "Проверьте прогресс через /status",
+            parse_mode="HTML",
+        )
+        return
+
     msg = await message.answer(t("negotiations.replying"))
 
     async def progress(text: str) -> None:

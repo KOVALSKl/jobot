@@ -11,7 +11,9 @@ from bot.decorators import require_auth
 from bot.keyboards import apply_confirm, apply_options, cancel_kb
 from bot.services.apply import ApplyService
 from bot.services.auth import AuthService
+from bot.services.heavy_queue import format_queue_error, schedule_heavy_task
 from bot.states import ApplyStates
+from bot.settings import HEAVY_TASKS_MODE
 from bot.texts import t
 
 router = Router()
@@ -139,6 +141,28 @@ async def _run_apply(
     message_template: str | None = None,
 ) -> None:
     """Выполняет цикл отклика на похожие вакансии и транслирует прогресс."""
+    if HEAVY_TASKS_MODE == "celery":
+        try:
+            task = await schedule_heavy_task(
+                user_id=user_id,
+                operation="apply",
+                payload={
+                    "search": search,
+                    "excluded_terms": excluded,
+                    "message_template": message_template,
+                },
+            )
+        except Exception as ex:
+            await message.edit_text(format_queue_error(ex))
+            return
+        await message.edit_text(
+            "✅ Задача поставлена в очередь.\n"
+            f"ID: <code>{task.task_id}</code>\n"
+            "Проверьте прогресс через /status",
+            parse_mode="HTML",
+        )
+        return
+
     status_msg = await message.edit_text(t("apply.running"))
 
     async def progress(text: str) -> None:

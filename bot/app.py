@@ -21,7 +21,7 @@ from bot.services import (
     ResumeService,
 )
 from bot.services.concurrency import OperationGuard
-from bot.settings import create_storage
+from bot.settings import HEAVY_TASK_GLOBAL_LIMIT, create_storage
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ def create_dispatcher() -> Dispatcher:
     dp = Dispatcher(storage=MemoryStorage())
 
     store = create_storage()
-    operation_guard = OperationGuard()
+    operation_guard = OperationGuard(max_global_heavy_tasks=HEAVY_TASK_GLOBAL_LIMIT)
 
     auth_service = AuthService(storage=store, operation_guard=operation_guard)
     dp["auth_service"] = auth_service

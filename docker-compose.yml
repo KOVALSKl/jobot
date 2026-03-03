@@ -1,4 +1,9 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: hh-bot-redis
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     container_name: hh-bot-postgres
@@ -26,15 +31,48 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
     volumes:
       - ./data:/app/data
     environment:
       - DATA_DIR=/app/data
       - STORAGE_BACKEND=postgres
+      - HEAVY_TASKS_MODE=celery
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_NAME=hh_bot
       - DB_USER=hh_bot
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - TZ=Europe/Moscow
+    secrets:
+      - postgres_password
+      - encryption_key
+      - bot_token
+
+  hh-bot-worker:
+    build: .
+    container_name: hh-bot-worker
+    restart: unless-stopped
+    command: ["celery", "-A", "bot.celery_app:celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATA_DIR=/app/data
+      - STORAGE_BACKEND=postgres
+      - HEAVY_TASKS_MODE=celery
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=hh_bot
+      - DB_USER=hh_bot
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - TZ=Europe/Moscow
     secrets:
       - postgres_password

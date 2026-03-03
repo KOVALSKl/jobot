@@ -25,6 +25,9 @@ def main_menu() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="🔄 Обновить токен"),
                 KeyboardButton(text="⚙️ Помощь"),
             ],
+            [
+                KeyboardButton(text="📌 Статус задачи"),
+            ],
         ],
         resize_keyboard=True,
     )

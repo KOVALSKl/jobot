@@ -9,7 +9,9 @@ from aiogram.types import CallbackQuery, Message
 from bot.decorators import require_auth
 from bot.keyboards import resume_actions
 from bot.services.auth import AuthService
+from bot.services.heavy_queue import format_queue_error, schedule_heavy_task
 from bot.services.resume import ResumeService
+from bot.settings import HEAVY_TASKS_MODE
 from bot.texts import t
 
 router = Router()
@@ -38,6 +40,29 @@ async def cmd_update_resumes(
 ) -> None:
     """Публикует / поднимает все доступные для обновления резюме."""
     user_id = event.from_user.id
+
+    if HEAVY_TASKS_MODE == "celery":
+        if isinstance(event, CallbackQuery):
+            await event.answer()
+            sender = event.message
+        else:
+            sender = event
+        try:
+            task = await schedule_heavy_task(
+                user_id=user_id,
+                operation="update",
+                payload={},
+            )
+        except Exception as ex:
+            await sender.answer(format_queue_error(ex))
+            return
+        await sender.answer(
+            "✅ Обновление резюме поставлено в очередь.\n"
+            f"ID: <code>{task.task_id}</code>\n"
+            "Проверьте прогресс через /status",
+            parse_mode="HTML",
+        )
+        return
 
     if isinstance(event, CallbackQuery):
         await event.answer()

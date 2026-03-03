@@ -13,6 +13,7 @@ from bot.auth_manager import AuthManager
 from bot.decorators import require_auth
 from bot.keyboards import cancel_kb, logout_confirm, main_menu, password_choice
 from bot.services.auth import AuthService
+from bot.services.tasks import ACTIVE_TASK_STATUSES, TaskQueueService
 from bot.states import AuthStates
 from bot.texts import t
 
@@ -25,6 +26,14 @@ router = Router()
 @router.message(Command("login"))
 async def login_start(message: Message, state: FSMContext) -> None:
     """Запускает процесс входа в HH через Playwright."""
+    queue = TaskQueueService()
+    task = await queue.get_user_task(user_id=message.from_user.id)
+    if task is not None and task.status in ACTIVE_TASK_STATUSES:
+        await message.answer(
+            "⚠️ Пока выполняется тяжёлая задача, авторизацию запускать нельзя.\n"
+            "Дождитесь завершения и попробуйте снова."
+        )
+        return
     await state.set_state(AuthStates.waiting_for_username)
     await message.answer(
         t("auth.login_prompt"),

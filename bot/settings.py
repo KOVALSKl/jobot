@@ -18,6 +18,15 @@ DB_HOST: str = os.getenv("DB_HOST", "localhost")
 DB_PORT: str = os.getenv("DB_PORT", "5432")
 DB_NAME: str = os.getenv("DB_NAME", "hh_bot")
 DB_USER: str = os.getenv("DB_USER", "hh_bot")
+HEAVY_TASKS_MODE: str = os.getenv("HEAVY_TASKS_MODE", "inline")
+HEAVY_TASK_COOLDOWN_SECONDS: int = int(
+    os.getenv("HEAVY_TASK_COOLDOWN_SECONDS", "60")
+)
+HEAVY_TASK_GLOBAL_LIMIT: int = int(os.getenv("HEAVY_TASK_GLOBAL_LIMIT", "4"))
+CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
+CELERY_RESULT_BACKEND: str = os.getenv(
+    "CELERY_RESULT_BACKEND", "redis://redis:6379/1"
+)
 
 
 def _build_database_url() -> str:

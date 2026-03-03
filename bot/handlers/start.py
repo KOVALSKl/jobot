@@ -7,8 +7,11 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
+from bot.decorators import require_auth
 from bot.keyboards import auth_menu, main_menu
 from bot.services.auth import AuthService
+from bot.services.heavy_queue import cancel_user_task, render_task_status
+from bot.services.tasks import TaskQueueService
 from bot.texts import t
 
 router = Router()
@@ -41,3 +44,29 @@ async def cancel_callback(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await callback.message.edit_text(t("start.cancelled"))
     await callback.answer()
+
+
+@router.message(Command("status"))
+@router.message(F.text == "📌 Статус задачи")
+@require_auth
+async def cmd_status(message: Message, auth_service: AuthService) -> None:
+    """Показывает статус последней фоновой задачи пользователя."""
+    queue = TaskQueueService()
+    task = await queue.get_user_task(user_id=message.from_user.id)
+    await message.answer(render_task_status(task), parse_mode="HTML")
+
+
+@router.message(Command("cancel_task"))
+@require_auth
+async def cmd_cancel_task(message: Message, auth_service: AuthService) -> None:
+    """Запрашивает отмену активной фоновой задачи пользователя."""
+    task = await cancel_user_task(user_id=message.from_user.id)
+    if task is None:
+        await message.answer("ℹ️ У вас нет активных задач для отмены.")
+        return
+    await message.answer(
+        "🛑 Запрос на отмену отправлен.\n"
+        f"ID: <code>{task.task_id}</code>\n"
+        "Проверьте статус через /status",
+        parse_mode="HTML",
+    )

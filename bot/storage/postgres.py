@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
-import concurrent.futures
 import tempfile
-from http.cookiejar import MozillaCookieJar
 from pathlib import Path
 from typing import Any
 
@@ -17,17 +14,11 @@ from hh_applicant_tool.backends import ConfigBackend, CookieBackend
 from bot.database import close_db, get_session_factory, init_db
 from bot.models import UserConfig, UserCookies
 from bot.security.crypto import CryptoService, get_crypto_service
-
-_SYNC_BRIDGE_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=4)
-
-
-def _run_coro_sync(coro: Any) -> Any:
-    """Синхронно выполняет корутину для sync-интерфейсов hh-applicant-tool."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-    return _SYNC_BRIDGE_POOL.submit(asyncio.run, coro).result()
+from bot.storage.postgres_sync_backends import (
+    PgSyncConfigBackend,
+    PgSyncCookieBackend,
+    build_sync_engine,
+)
 
 
 class PostgreSQLStorage:
@@ -37,6 +28,7 @@ class PostgreSQLStorage:
         self._dsn = dsn
         self._work_dir = work_dir or Path(tempfile.mkdtemp(prefix="hh-bot-"))
         self._crypto = get_crypto_service()
+        self._sync_engine = build_sync_engine(dsn)
 
     @staticmethod
     def _is_encrypted_payload(data: dict[str, Any]) -> bool:
@@ -140,10 +132,14 @@ class PostgreSQLStorage:
             await session.commit()
 
     def _config_backend(self, user_id: int) -> ConfigBackend:
-        return PgConfigBackend(storage=self, user_id=user_id)
+        return PgSyncConfigBackend(
+            engine=self._sync_engine, user_id=user_id, crypto=self._crypto
+        )
 
     def _cookie_backend(self, user_id: int) -> CookieBackend:
-        return PgCookieBackend(storage=self, user_id=user_id)
+        return PgSyncCookieBackend(
+            engine=self._sync_engine, user_id=user_id, crypto=self._crypto
+        )
 
     def get_config_backend(self, user_id: int) -> ConfigBackend:
         return self._config_backend(user_id)
@@ -162,49 +158,4 @@ class PostgreSQLStorage:
 
     async def close(self) -> None:
         await close_db()
-
-
-class PgConfigBackend:
-    """ConfigBackend для hh-applicant-tool поверх PostgreSQLStorage."""
-
-    def __init__(self, storage: PostgreSQLStorage, user_id: int) -> None:
-        self._storage = storage
-        self._user_id = user_id
-
-    def exists(self) -> bool:
-        return bool(_run_coro_sync(self._storage.config_exists(self._user_id)))
-
-    def load(self) -> dict[str, Any]:
-        return _run_coro_sync(self._storage.load_config(self._user_id))
-
-    def save(self, data: dict[str, Any]) -> None:
-        _run_coro_sync(self._storage.save_config(self._user_id, data))
-
-
-class PgCookieBackend:
-    """CookieBackend для hh-applicant-tool поверх PostgreSQLStorage."""
-
-    def __init__(self, storage: PostgreSQLStorage, user_id: int) -> None:
-        self._storage = storage
-        self._user_id = user_id
-
-    def exists(self) -> bool:
-        return bool(_run_coro_sync(self._storage.load_cookies(self._user_id)))
-
-    def load_to_jar(self, jar: MozillaCookieJar) -> None:
-        cookies_text = _run_coro_sync(self._storage.load_cookies(self._user_id))
-        if not cookies_text:
-            return
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".txt", delete=False, encoding="utf-8"
-        )
-        try:
-            tmp.write(cookies_text)
-            tmp.close()
-            jar.filename = tmp.name
-            jar.load(ignore_discard=True, ignore_expires=True)
-        finally:
-            Path(tmp.name).unlink(missing_ok=True)
-
-    def save_from_text(self, text: str) -> None:
-        _run_coro_sync(self._storage.save_cookies(self._user_id, text))
+        self._sync_engine.dispose()
