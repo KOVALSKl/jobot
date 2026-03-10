@@ -16,7 +16,7 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: POSTGRES_PASSWORD,BOT_TOKEN,ENCRYPTION_KEY
+          envs: POSTGRES_PASSWORD,BOT_TOKEN,ENCRYPTION_KEY,HEAVY_TASKS_MODE,ENABLE_CELERY_BEAT
           script: |
             cd /opt/jobot
             git pull origin main
@@ -35,9 +35,27 @@ jobs:
 
             docker compose build hh-bot
             docker compose run --rm hh-bot alembic upgrade head
-            docker compose up -d --remove-orphans hh-bot
+            if [ "${HEAVY_TASKS_MODE:-celery}" = "celery" ]; then
+              services="hh-bot hh-bot-worker"
+              if [ "${ENABLE_CELERY_BEAT:-false}" = "true" ]; then
+                available_services="$(docker compose config --services)"
+                case "${available_services}" in
+                  *"hh-bot-beat"*)
+                    services="${services} hh-bot-beat"
+                    ;;
+                  *)
+                    echo "ENABLE_CELERY_BEAT=true, но сервис hh-bot-beat отсутствует в compose. Пропускаем запуск beat."
+                    ;;
+                esac
+              fi
+              docker compose up -d --remove-orphans ${services}
+            else
+              docker compose up -d --remove-orphans hh-bot
+            fi
             docker image prune -f
         env:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          HEAVY_TASKS_MODE: ${{ vars.HEAVY_TASKS_MODE }}
+          ENABLE_CELERY_BEAT: ${{ vars.ENABLE_CELERY_BEAT }}

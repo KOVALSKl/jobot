@@ -1,0 +1,97 @@
+{
+  "profile": {
+    "concurrency_users": 10,
+    "rationale": "Инженерный baseline для локального контура: N=10 параллельных пользователей как минимально достаточный smoke-профиль без внешнего стенда."
+  },
+  "parity": {
+    "scenarios": [
+      {
+        "operation": "apply",
+        "result_direct": "Рассылка откликов завершена",
+        "result_orchestrated": "Рассылка откликов завершена",
+        "progress_direct": [
+          "apply:42"
+        ],
+        "progress_orchestrated": [
+          "apply:42"
+        ],
+        "parity_ok": true
+      },
+      {
+        "operation": "clear",
+        "result_direct": "Очистка откликов завершена",
+        "result_orchestrated": "Очистка откликов завершена",
+        "progress_direct": [
+          "clear:42"
+        ],
+        "progress_orchestrated": [
+          "clear:42"
+        ],
+        "parity_ok": true
+      },
+      {
+        "operation": "reply",
+        "result_direct": "Ответы работодателям отправлены",
+        "result_orchestrated": "Ответы работодателям отправлены",
+        "progress_direct": [
+          "reply:42"
+        ],
+        "progress_orchestrated": [
+          "reply:42"
+        ],
+        "parity_ok": true
+      },
+      {
+        "operation": "update",
+        "result_direct": "update:42",
+        "result_orchestrated": "update:42",
+        "progress_direct": [
+          "update:42"
+        ],
+        "progress_orchestrated": [
+          "update:42"
+        ],
+        "parity_ok": true
+      }
+    ],
+    "ok": true
+  },
+  "perf": {
+    "heavy_operation_latency_ms": {
+      "count": 40,
+      "min_ms": 8.065,
+      "p50_ms": 9.994,
+      "p95_ms": 11.824,
+      "max_ms": 11.861,
+      "errors": 0
+    },
+    "auth_refresh_latency_ms": {
+      "count": 10,
+      "min_ms": 3.123,
+      "p50_ms": 3.238,
+      "p95_ms": 3.36,
+      "max_ms": 3.502,
+      "errors": 0
+    },
+    "event_loop_lag_baseline_ms": {
+      "count": 120,
+      "min_ms": 0.212,
+      "p50_ms": 1.072,
+      "p95_ms": 1.332,
+      "max_ms": 1.814,
+      "errors": 0
+    },
+    "event_loop_lag_under_load_ms": {
+      "count": 5,
+      "min_ms": 0.192,
+      "p50_ms": 0.817,
+      "p95_ms": 1.127,
+      "max_ms": 1.295,
+      "errors": 0
+    },
+    "no_burst_regression": true,
+    "no_loop_block_growth_vs_baseline": true
+  },
+  "errors": [],
+  "verdict": "closed"
+}

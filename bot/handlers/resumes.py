@@ -9,6 +9,7 @@ from aiogram.types import CallbackQuery, Message
 from bot.decorators import require_auth
 from bot.keyboards import resume_actions
 from bot.services.auth import AuthService
+from bot.services.heavy_executor import TaskCancelledError, run_heavy_operation
 from bot.services.heavy_queue import format_queue_error, schedule_heavy_task
 from bot.services.resume import ResumeService
 from bot.settings import HEAVY_TASKS_MODE
@@ -36,7 +37,7 @@ async def cmd_resumes(message: Message, auth_service: AuthService, resume_servic
 @router.callback_query(F.data == "update_resumes")
 @require_auth
 async def cmd_update_resumes(
-    event: Message | CallbackQuery, auth_service: AuthService, resume_service: ResumeService
+    event: Message | CallbackQuery, auth_service: AuthService
 ) -> None:
     """Публикует / поднимает все доступные для обновления резюме."""
     user_id = event.from_user.id
@@ -70,8 +71,21 @@ async def cmd_update_resumes(
     else:
         msg = await event.answer(t("resumes.updating"))
 
+    async def progress(text: str) -> None:
+        try:
+            await msg.edit_text(text, parse_mode="HTML")
+        except Exception:
+            pass
+
     try:
-        result = await resume_service.update_resumes(user_id)
+        result = await run_heavy_operation(
+            operation="update",
+            payload={"user_id": user_id},
+            report_progress=progress,
+            is_cancel_requested=lambda: False,
+        )
         await msg.edit_text(result, parse_mode="HTML")
+    except TaskCancelledError as ex:
+        await msg.edit_text(str(ex))
     except Exception as ex:
         await msg.edit_text(t("common.error", error=ex))

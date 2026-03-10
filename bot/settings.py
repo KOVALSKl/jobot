@@ -23,6 +23,7 @@ HEAVY_TASK_COOLDOWN_SECONDS: int = int(
     os.getenv("HEAVY_TASK_COOLDOWN_SECONDS", "60")
 )
 HEAVY_TASK_GLOBAL_LIMIT: int = int(os.getenv("HEAVY_TASK_GLOBAL_LIMIT", "4"))
+HH_GATEWAY_MODE: str = os.getenv("HH_GATEWAY_MODE", "async")
 CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
 CELERY_RESULT_BACKEND: str = os.getenv(
     "CELERY_RESULT_BACKEND", "redis://redis:6379/1"

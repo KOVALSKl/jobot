@@ -9,8 +9,8 @@ from aiogram.types import CallbackQuery, Message
 
 from bot.decorators import require_auth
 from bot.keyboards import apply_confirm, apply_options, cancel_kb
-from bot.services.apply import ApplyService
 from bot.services.auth import AuthService
+from bot.services.heavy_executor import TaskCancelledError, run_heavy_operation
 from bot.services.heavy_queue import format_queue_error, schedule_heavy_task
 from bot.states import ApplyStates
 from bot.settings import HEAVY_TASKS_MODE
@@ -34,11 +34,11 @@ async def cmd_apply(message: Message, auth_service: AuthService, state: FSMConte
 
 @router.callback_query(F.data == "apply_default")
 async def apply_default(
-    callback: CallbackQuery, apply_service: ApplyService, state: FSMContext
+    callback: CallbackQuery
 ) -> None:
     """Запускает отклик с настройками по умолчанию (без поискового фильтра)."""
     await callback.answer()
-    await _run_apply(callback.message, callback.from_user.id, apply_service, state)
+    await _run_apply(callback.message, callback.from_user.id)
 
 
 @router.callback_query(F.data == "apply_search")
@@ -85,7 +85,7 @@ async def apply_excluded_received(message: Message, state: FSMContext) -> None:
 
 @router.message(ApplyStates.waiting_for_message)
 async def apply_message_received(
-    message: Message, state: FSMContext, apply_service: ApplyService
+    message: Message, state: FSMContext
 ) -> None:
     """Сохраняет шаблон сопроводительного письма и отображает сводку для подтверждения."""
     msg_template = (
@@ -114,7 +114,7 @@ async def apply_message_received(
 
 @router.callback_query(F.data == "apply_go")
 async def apply_go(
-    callback: CallbackQuery, apply_service: ApplyService, state: FSMContext
+    callback: CallbackQuery, state: FSMContext
 ) -> None:
     """Подтверждает и запускает процесс отклика."""
     await callback.answer()
@@ -123,8 +123,6 @@ async def apply_go(
     await _run_apply(
         callback.message,
         callback.from_user.id,
-        apply_service,
-        state,
         search=data.get("search"),
         excluded=data.get("excluded"),
         message_template=data.get("message_template"),
@@ -134,8 +132,6 @@ async def apply_go(
 async def _run_apply(
     message: Message,
     user_id: int,
-    apply_service: ApplyService,
-    state: FSMContext,
     search: str | None = None,
     excluded: str | None = None,
     message_template: str | None = None,
@@ -172,12 +168,19 @@ async def _run_apply(
             pass
 
     try:
-        await apply_service.apply_similar(
-            user_id,
-            callback=progress,
-            search=search,
-            excluded_terms=excluded,
-            message_template=message_template,
+        result = await run_heavy_operation(
+            operation="apply",
+            payload={
+                "user_id": user_id,
+                "search": search,
+                "excluded_terms": excluded,
+                "message_template": message_template,
+            },
+            report_progress=progress,
+            is_cancel_requested=lambda: False,
         )
+        await status_msg.edit_text(result, parse_mode="HTML")
+    except TaskCancelledError as ex:
+        await status_msg.edit_text(str(ex))
     except Exception as ex:
         await status_msg.edit_text(t("apply.error", error=ex))

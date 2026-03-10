@@ -6,82 +6,18 @@ import asyncio
 from typing import Any
 
 from bot.celery_app import celery_app
-from bot.services import ApplyService, NegotiationService, ResumeService
-from bot.services.concurrency import OperationGuard
+from bot.services.heavy_executor import TaskCancelledError, run_heavy_operation
 from bot.services.tasks import SyncTaskStore
-from bot.settings import create_storage
-
-
-class TaskCancelledError(RuntimeError):
-    """Фоновая задача отменена пользователем."""
-
 
 async def _run_heavy_operation(task_id: str, operation: str, payload: dict[str, Any]) -> str:
-    user_id = int(payload["user_id"])
+    """Async bridge: проксирует прогресс/cancel в SyncTaskStore для worker."""
     store = SyncTaskStore()
-    storage = create_storage()
-    await storage.init()
-    guard = OperationGuard(max_global_heavy_tasks=1)
-    try:
-        if operation == "apply":
-            service = ApplyService(storage=storage, operation_guard=guard)
-
-            async def progress(text: str) -> None:
-                store.set_progress(task_id, text)
-                if store.is_cancel_requested(task_id):
-                    raise TaskCancelledError("Операция отменена")
-
-            await service.apply_similar(
-                user_id=user_id,
-                callback=progress,
-                search=payload.get("search"),
-                excluded_terms=payload.get("excluded_terms"),
-                message_template=payload.get("message_template"),
-            )
-            return "Рассылка откликов завершена"
-
-        if operation == "clear":
-            service = NegotiationService(storage=storage, operation_guard=guard)
-
-            async def progress(text: str) -> None:
-                store.set_progress(task_id, text)
-                if store.is_cancel_requested(task_id):
-                    raise TaskCancelledError("Операция отменена")
-
-            await service.clear(
-                user_id=user_id,
-                callback=progress,
-                older_than=payload.get("older_than"),
-                blacklist=bool(payload.get("blacklist", False)),
-            )
-            return "Очистка откликов завершена"
-
-        if operation == "reply":
-            service = NegotiationService(storage=storage, operation_guard=guard)
-
-            async def progress(text: str) -> None:
-                store.set_progress(task_id, text)
-                if store.is_cancel_requested(task_id):
-                    raise TaskCancelledError("Операция отменена")
-
-            await service.reply_employers(
-                user_id=user_id,
-                callback=progress,
-                reply_message=str(payload.get("reply_message", "")),
-            )
-            return "Ответы работодателям отправлены"
-
-        if operation == "update":
-            service = ResumeService(storage=storage, operation_guard=guard)
-            if store.is_cancel_requested(task_id):
-                raise TaskCancelledError("Операция отменена")
-            result = await service.update_resumes(user_id=user_id)
-            store.set_progress(task_id, result)
-            return result
-
-        raise RuntimeError(f"Unsupported operation: {operation}")
-    finally:
-        await storage.close()
+    return await run_heavy_operation(
+        operation=operation,
+        payload=payload,
+        report_progress=lambda text: store.set_progress(task_id, text),
+        is_cancel_requested=lambda: store.is_cancel_requested(task_id),
+    )
 
 
 @celery_app.task(bind=True, name="bot.run_heavy_task")
@@ -96,6 +32,8 @@ def run_heavy_task(self, task_id: str, operation: str, payload: dict[str, Any]) 
 
     store.mark_running(task_id)
     try:
+        # В worker-процессе Celery выполняем общий async executor через
+        # `asyncio.run`, сохраняя единый контракт с inline-режимом.
         result = asyncio.run(_run_heavy_operation(task_id, operation, payload))
         store.mark_success(task_id, result)
         return result

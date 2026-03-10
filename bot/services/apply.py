@@ -9,7 +9,7 @@ from typing import Any
 from hh_applicant_tool.api.errors import ApiError, LimitExceeded
 from hh_applicant_tool.utils.string import rand_text, unescape_string
 
-from bot.services.base import BaseService, ProgressCallback, run_sync
+from bot.services.base import BaseService, ProgressCallback
 from bot.services.concurrency import OperationInProgressError
 from bot.texts import t
 
@@ -29,113 +29,109 @@ class ApplyService(BaseService):
     ) -> None:
         """Откликается на похожие вакансии для каждого опубликованного резюме."""
         async def _run() -> None:
-            tool = self._get_tool(user_id)
-            resumes = await run_sync(tool.get_resumes)
-            published = [r for r in resumes if r["status"]["id"] == "published"]
-            if not published:
-                await callback(t("apply.no_published"))
-                return
+            async with self._gateway_context(user_id) as gateway:
+                resumes = await gateway.get_resumes()
+                published = [r for r in resumes if r["status"]["id"] == "published"]
+                if not published:
+                    await callback(t("apply.no_published"))
+                    return
 
-            me = await run_sync(tool.get_me)
-            excluded = _parse_excluded(excluded_terms)
-            total_applied = 0
-            total_skipped = 0
-            limit_reached = False
+                me = await gateway.get_me()
+                excluded = _parse_excluded(excluded_terms)
+                total_applied = 0
+                total_skipped = 0
+                limit_reached = False
 
-            for resume in published:
-                if limit_reached:
-                    break
-                await callback(t("apply.resume_start", title=resume["title"]))
-
-                placeholders = {
-                    "first_name": me.get("first_name") or "",
-                    "last_name": me.get("last_name") or "",
-                    "email": me.get("email") or "",
-                    "phone": me.get("phone") or "",
-                    "resume_title": resume.get("title") or "",
-                }
-
-                for page in range(20):
+                for resume in published:
                     if limit_reached:
                         break
-                    params: dict[str, Any] = {"page": page, "per_page": 100}
-                    if search:
-                        params["text"] = search
+                    await callback(t("apply.resume_start", title=resume["title"]))
 
-                    try:
-                        res = await run_sync(
-                            tool.api_client.get,
-                            f"/resumes/{resume['id']}/similar_vacancies",
-                            params,
-                        )
-                    except ApiError as ex:
-                        await callback(t("apply.vacancies_error", error=str(ex)))
-                        break
+                    placeholders = {
+                        "first_name": me.get("first_name") or "",
+                        "last_name": me.get("last_name") or "",
+                        "email": me.get("email") or "",
+                        "phone": me.get("phone") or "",
+                        "resume_title": resume.get("title") or "",
+                    }
 
-                    items = res.get("items", [])
-                    if not items:
-                        break
-
-                    for vacancy in items:
+                    for page in range(20):
                         if limit_reached:
                             break
+                        params: dict[str, Any] = {"page": page, "per_page": 100}
+                        if search:
+                            params["text"] = search
+
                         try:
-                            if vacancy.get("relations"):
-                                total_skipped += 1
-                                continue
-                            if vacancy.get("archived"):
-                                total_skipped += 1
-                                continue
-                            if vacancy.get("response_url"):
-                                total_skipped += 1
-                                continue
-                            if _is_excluded(vacancy, excluded):
-                                total_skipped += 1
-                                continue
-
-                            msg = ""
-                            if message_template and (
-                                vacancy.get("response_letter_required")
-                                or message_template
-                            ):
-                                msg_placeholders = {
-                                    "vacancy_name": vacancy.get("name", ""),
-                                    "employer_name": vacancy.get("employer", {}).get("name", ""),
-                                    **placeholders,
-                                }
-                                try:
-                                    msg = unescape_string(
-                                        rand_text(message_template) % msg_placeholders
-                                    )
-                                except Exception:
-                                    msg = message_template
-
-                            await run_sync(
-                                tool.api_client.post,
-                                "/negotiations",
-                                {
-                                    "resume_id": resume["id"],
-                                    "vacancy_id": vacancy["id"],
-                                    "message": msg,
-                                },
-                                delay=random.uniform(1, 3),
+                            res = await gateway.call_api(
+                                method="GET",
+                                endpoint=f"/resumes/{resume['id']}/similar_vacancies",
+                                params=params,
                             )
-                            total_applied += 1
-
-                            if total_applied % 10 == 0:
-                                await callback(t("apply.progress", count=total_applied))
-
-                        except LimitExceeded:
-                            limit_reached = True
-                            await callback(t("apply.limit_reached"))
                         except ApiError as ex:
-                            logger.warning("Apply error: %s", ex)
-                            total_skipped += 1
+                            await callback(t("apply.vacancies_error", error=str(ex)))
+                            break
 
-                    if page >= res.get("pages", 1) - 1:
-                        break
+                        items = res.get("items", [])
+                        if not items:
+                            break
 
-            await callback(t("apply.done", applied=total_applied, skipped=total_skipped))
+                        for vacancy in items:
+                            if limit_reached:
+                                break
+                            try:
+                                if vacancy.get("relations"):
+                                    total_skipped += 1
+                                    continue
+                                if vacancy.get("archived"):
+                                    total_skipped += 1
+                                    continue
+                                if vacancy.get("response_url"):
+                                    total_skipped += 1
+                                    continue
+                                if _is_excluded(vacancy, excluded):
+                                    total_skipped += 1
+                                    continue
+
+                                msg = ""
+                                if message_template and (
+                                    vacancy.get("response_letter_required")
+                                    or message_template
+                                ):
+                                    msg_placeholders = {
+                                        "vacancy_name": vacancy.get("name", ""),
+                                        "employer_name": vacancy.get("employer", {}).get("name", ""),
+                                        **placeholders,
+                                    }
+                                    try:
+                                        msg = unescape_string(
+                                            rand_text(message_template) % msg_placeholders
+                                        )
+                                    except Exception:
+                                        msg = message_template
+
+                                await gateway.create_negotiation(
+                                    resume_id=resume["id"],
+                                    vacancy_id=vacancy["id"],
+                                    message=msg,
+                                    delay=random.uniform(1, 3),
+                                )
+                                total_applied += 1
+
+                                if total_applied % 10 == 0:
+                                    await callback(t("apply.progress", count=total_applied))
+
+                            except LimitExceeded:
+                                limit_reached = True
+                                await callback(t("apply.limit_reached"))
+                            except ApiError as ex:
+                                logger.warning("Apply error: %s", ex)
+                                total_skipped += 1
+
+                        if page >= res.get("pages", 1) - 1:
+                            break
+
+                await callback(t("apply.done", applied=total_applied, skipped=total_skipped))
 
         try:
             await self._run_exclusive_heavy("apply", user_id, _run)

@@ -1,0 +1,6 @@
+verdict=closed
+users=10
+parity_ok=True
+no_burst_regression=True
+no_loop_block_growth_vs_baseline=True
+errors=0

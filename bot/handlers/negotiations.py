@@ -11,6 +11,7 @@ from bot.decorators import require_auth
 from bot.keyboards import cancel_kb, clear_options
 from bot.services.api import ApiService
 from bot.services.auth import AuthService
+from bot.services.heavy_executor import TaskCancelledError, run_heavy_operation
 from bot.services.heavy_queue import format_queue_error, schedule_heavy_task
 from bot.services.negotiation import NegotiationService
 from bot.states import ClearStates, ReplyStates
@@ -51,7 +52,7 @@ async def cmd_clear(message: Message, auth_service: AuthService) -> None:
 
 @router.callback_query(F.data == "clear_discards")
 async def clear_discards(
-    callback: CallbackQuery, negotiation_service: NegotiationService, state: FSMContext
+    callback: CallbackQuery
 ) -> None:
     """Удаляет все отклики со статусом 'отклонено'."""
     await callback.answer()
@@ -82,9 +83,19 @@ async def clear_discards(
             pass
 
     try:
-        await negotiation_service.clear(
-            callback.from_user.id, callback=progress
+        result = await run_heavy_operation(
+            operation="clear",
+            payload={
+                "user_id": callback.from_user.id,
+                "older_than": None,
+                "blacklist": False,
+            },
+            report_progress=progress,
+            is_cancel_requested=lambda: False,
         )
+        await msg.edit_text(result, parse_mode="HTML")
+    except TaskCancelledError as ex:
+        await msg.edit_text(str(ex))
     except Exception as ex:
         await msg.edit_text(t("common.error", error=ex))
 
@@ -104,7 +115,7 @@ async def clear_older_start(
 
 @router.message(ClearStates.waiting_for_days)
 async def clear_older_days(
-    message: Message, state: FSMContext, negotiation_service: NegotiationService
+    message: Message, state: FSMContext
 ) -> None:
     """Парсит количество дней и очищает старые отклики."""
     try:
@@ -141,9 +152,19 @@ async def clear_older_days(
             pass
 
     try:
-        await negotiation_service.clear(
-            message.from_user.id, callback=progress, older_than=days
+        result = await run_heavy_operation(
+            operation="clear",
+            payload={
+                "user_id": message.from_user.id,
+                "older_than": days,
+                "blacklist": False,
+            },
+            report_progress=progress,
+            is_cancel_requested=lambda: False,
         )
+        await msg.edit_text(result, parse_mode="HTML")
+    except TaskCancelledError as ex:
+        await msg.edit_text(str(ex))
     except Exception as ex:
         await msg.edit_text(t("common.error", error=ex))
 
@@ -165,7 +186,7 @@ async def cmd_reply(message: Message, auth_service: AuthService, state: FSMConte
 
 @router.message(ReplyStates.waiting_for_message)
 async def reply_message_received(
-    message: Message, state: FSMContext, negotiation_service: NegotiationService
+    message: Message, state: FSMContext
 ) -> None:
     """Отправляет ответы на все непрочитанные сообщения работодателей."""
     reply_text = message.text.strip()
@@ -201,9 +222,15 @@ async def reply_message_received(
             pass
 
     try:
-        await negotiation_service.reply_employers(
-            message.from_user.id, callback=progress, reply_message=reply_text
+        result = await run_heavy_operation(
+            operation="reply",
+            payload={"user_id": message.from_user.id, "reply_message": reply_text},
+            report_progress=progress,
+            is_cancel_requested=lambda: False,
         )
+        await msg.edit_text(result, parse_mode="HTML")
+    except TaskCancelledError as ex:
+        await msg.edit_text(str(ex))
     except Exception as ex:
         await msg.edit_text(t("common.error", error=ex))
 
