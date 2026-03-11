@@ -7,10 +7,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  gate:
+  runtime-import-gate:
     runs-on: ubuntu-latest
-    env:
-      PYTHONPATH: hh-applicant-tool/src
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,9 +21,96 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ./hh-applicant-tool
           pip install -r requirements.txt
           pip install ruff
+          # Post-restore policy: always reinstall hh-applicant-tool from current source.
+          pip install --force-reinstall ./hh-applicant-tool
+
+      - name: Prepare runtime gate artifacts
+        run: mkdir -p artifacts/runtime-gate
+
+      - name: Guard against PYTHONPATH masking
+        shell: bash
+        run: |
+          set -eo pipefail
+          if [ -n "${PYTHONPATH:-}" ]; then
+            echo "::error::PYTHONPATH is set (${PYTHONPATH}) and can mask installed package imports."
+            exit 1
+          fi
+          echo "PYTHONPATH is empty" | tee artifacts/runtime-gate/00_pythonpath_guard.log
+
+      - name: Installed package sanity-check (backends)
+        shell: bash
+        run: |
+          set -eo pipefail
+          python scripts/check_installed_backends.py | tee artifacts/runtime-gate/10_sanity_backends.log
+
+      - name: Runtime import-smoke (storage)
+        shell: bash
+        run: |
+          set -eo pipefail
+          python scripts/import_smoke_storage.py | tee artifacts/runtime-gate/20_import_smoke_storage.log
+
+      - name: Upload runtime gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-import-gate-artifacts
+          path: artifacts/runtime-gate/*
+          if-no-files-found: error
+
+  stale-package-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install --force-reinstall ./hh-applicant-tool
+
+      - name: Run stale package negative/recovery scenario
+        shell: bash
+        run: |
+          set -eo pipefail
+          mkdir -p artifacts/stale-scenario
+          python scripts/stale_package_recovery_check.py | tee artifacts/stale-scenario/00_stale_recovery.log
+
+      - name: Upload stale scenario artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stale-package-regression-artifacts
+          path: artifacts/stale-scenario/*
+          if-no-files-found: error
+
+  gate:
+    runs-on: ubuntu-latest
+    needs:
+      - runtime-import-gate
+      - stale-package-regression
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff
+          pip install --force-reinstall ./hh-applicant-tool
 
       - name: Lint changed modules scope
         run: |

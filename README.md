@@ -50,6 +50,29 @@ pip install -r requirements.txt
 python -m bot
 ```
 
+## Post-restore процесс для `hh-applicant-tool`
+
+После любых изменений или восстановления файлов в `hh-applicant-tool` обязательно:
+
+```bash
+pip install --force-reinstall ./hh-applicant-tool
+python scripts/check_installed_backends.py
+python scripts/import_smoke_storage.py
+```
+
+Что это гарантирует:
+- установленный пакет в `site-packages` действительно обновлен;
+- `hh_applicant_tool.backends` присутствует и импортируется не из source tree;
+- runtime-импорты `bot.storage.filesystem` и `bot.storage.postgres` проходят без `PYTHONPATH`-маскировки.
+
+Для формализованной регрессионной проверки stale/recovery сценария:
+
+```bash
+python scripts/stale_package_recovery_check.py
+```
+
+Скрипт выполняет controlled negative (`FAIL`) и recovery (`PASS`) и сохраняет лог evidence в `artifacts/stale-scenario/`.
+
 ## Политика включения `hh-bot-beat`
 
 ### Когда включать beat
