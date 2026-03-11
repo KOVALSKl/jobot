@@ -59,34 +59,34 @@
   "perf": {
     "heavy_operation_latency_ms": {
       "count": 40,
-      "min_ms": 8.065,
-      "p50_ms": 9.994,
-      "p95_ms": 11.824,
-      "max_ms": 11.861,
+      "min_ms": 9.132,
+      "p50_ms": 10.287,
+      "p95_ms": 11.219,
+      "max_ms": 11.219,
       "errors": 0
     },
     "auth_refresh_latency_ms": {
       "count": 10,
-      "min_ms": 3.123,
-      "p50_ms": 3.238,
-      "p95_ms": 3.36,
-      "max_ms": 3.502,
+      "min_ms": 3.521,
+      "p50_ms": 3.564,
+      "p95_ms": 3.572,
+      "max_ms": 3.576,
       "errors": 0
     },
     "event_loop_lag_baseline_ms": {
       "count": 120,
-      "min_ms": 0.212,
-      "p50_ms": 1.072,
-      "p95_ms": 1.332,
-      "max_ms": 1.814,
+      "min_ms": 0.071,
+      "p50_ms": 1.081,
+      "p95_ms": 1.294,
+      "max_ms": 1.959,
       "errors": 0
     },
     "event_loop_lag_under_load_ms": {
       "count": 5,
-      "min_ms": 0.192,
-      "p50_ms": 0.817,
-      "p95_ms": 1.127,
-      "max_ms": 1.295,
+      "min_ms": 0.424,
+      "p50_ms": 0.838,
+      "p95_ms": 1.049,
+      "max_ms": 1.126,
       "errors": 0
     },
     "no_burst_regression": true,

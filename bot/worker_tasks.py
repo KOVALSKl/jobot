@@ -9,6 +9,12 @@ from bot.celery_app import celery_app
 from bot.services.heavy_executor import TaskCancelledError, run_heavy_operation
 from bot.services.tasks import SyncTaskStore
 
+
+@celery_app.task(name="bot.post_deploy_heavy_smoke")
+def post_deploy_heavy_smoke() -> str:
+    """Минимальный smoke-task для проверки worker/broker/result backend."""
+    return "heavy-smoke-ok"
+
 async def _run_heavy_operation(task_id: str, operation: str, payload: dict[str, Any]) -> str:
     """Async bridge: проксирует прогресс/cancel в SyncTaskStore для worker."""
     store = SyncTaskStore()

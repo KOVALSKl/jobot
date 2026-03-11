@@ -1,0 +1,60 @@
+name: Quality Gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: hh-applicant-tool/src
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ./hh-applicant-tool
+          pip install -r requirements.txt
+          pip install ruff
+
+      - name: Lint changed modules scope
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_REF="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_REF="$(git rev-parse HEAD~1)"
+          fi
+          CHANGED_PY="$(git diff --name-only "$BASE_REF" HEAD | awk '/\.(py)$/ {print}' | tr '\n' ' ')"
+          if [ -z "$CHANGED_PY" ]; then
+            echo "No changed Python modules to lint."
+            exit 0
+          fi
+          echo "Linting: $CHANGED_PY"
+          ruff check $CHANGED_PY
+
+      - name: Sanity-check services test imports
+        run: pytest --collect-only tests/services -q
+
+      - name: Run services tests
+        run: pytest -q tests/services
+
+      - name: Run acceptance script
+        run: python3 scripts/e4_acceptance_check.py --users 10
+
+      - name: Upload acceptance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e4-acceptance-artifacts
+          path: artifacts/e4/*
+          if-no-files-found: error
