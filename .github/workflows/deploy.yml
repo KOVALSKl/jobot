@@ -55,15 +55,7 @@ jobs:
 
               echo "Running post-deploy heavy smoke..."
               docker compose exec -T hh-bot python scripts/post_deploy_heavy_smoke.py --timeout 90 --artifact-path /tmp/post_deploy_heavy_smoke.json
-              docker compose exec -T hh-bot python - <<'PY'
-import json
-from pathlib import Path
-
-path = Path("/tmp/post_deploy_heavy_smoke.json")
-if not path.exists():
-    raise SystemExit("Smoke artifact not found: /tmp/post_deploy_heavy_smoke.json")
-print("post-deploy-heavy-smoke:", path.read_text(encoding="utf-8"))
-PY
+              docker compose exec -T hh-bot python -c "from pathlib import Path; path = Path('/tmp/post_deploy_heavy_smoke.json'); assert path.exists(), 'Smoke artifact not found: /tmp/post_deploy_heavy_smoke.json'; print('post-deploy-heavy-smoke:', path.read_text(encoding='utf-8'))"
             else
               docker compose up -d --remove-orphans hh-bot
             fi
