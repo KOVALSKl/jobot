@@ -63,6 +63,7 @@ class HeavyOperationExecutor:
                 callback=make_progress,
                 search=payload.get("search"),
                 excluded_terms=payload.get("excluded_terms"),
+                exclude_mode=payload.get("exclude_mode"),
                 message_template=payload.get("message_template"),
             )
             return "Рассылка откликов завершена"

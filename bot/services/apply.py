@@ -11,6 +11,11 @@ from hh_applicant_tool.utils.string import rand_text, unescape_string
 
 from bot.services.base import BaseService, ProgressCallback
 from bot.services.concurrency import OperationInProgressError
+from bot.services.vacancy_filter import (
+    find_exclusion,
+    normalize_exclude_mode,
+    parse_excluded_terms,
+)
 from bot.texts import t
 
 logger = logging.getLogger(__name__)
@@ -25,6 +30,7 @@ class ApplyService(BaseService):
         callback: ProgressCallback,
         search: str | None = None,
         excluded_terms: str | None = None,
+        exclude_mode: str | None = None,
         message_template: str | None = None,
     ) -> None:
         """Откликается на похожие вакансии для каждого опубликованного резюме."""
@@ -37,7 +43,8 @@ class ApplyService(BaseService):
                     return
 
                 me = await gateway.get_me()
-                excluded = _parse_excluded(excluded_terms)
+                mode = normalize_exclude_mode(exclude_mode)
+                excluded = parse_excluded_terms(excluded_terms)
                 total_applied = 0
                 total_skipped = 0
                 limit_reached = False
@@ -79,18 +86,50 @@ class ApplyService(BaseService):
                         for vacancy in items:
                             if limit_reached:
                                 break
+                            vacancy_id = vacancy.get("id")
                             try:
                                 if vacancy.get("relations"):
                                     total_skipped += 1
+                                    logger.debug(
+                                        "apply_skip reason=%s mode=%s vacancy_id=%s",
+                                        "already_related",
+                                        mode,
+                                        vacancy_id,
+                                    )
                                     continue
                                 if vacancy.get("archived"):
                                     total_skipped += 1
+                                    logger.debug(
+                                        "apply_skip reason=%s mode=%s vacancy_id=%s",
+                                        "archived",
+                                        mode,
+                                        vacancy_id,
+                                    )
                                     continue
                                 if vacancy.get("response_url"):
                                     total_skipped += 1
+                                    logger.debug(
+                                        "apply_skip reason=%s mode=%s vacancy_id=%s",
+                                        "already_responded",
+                                        mode,
+                                        vacancy_id,
+                                    )
                                     continue
-                                if _is_excluded(vacancy, excluded):
+                                decision = find_exclusion(
+                                    vacancy=vacancy,
+                                    excluded_terms=excluded,
+                                    exclude_mode=mode,
+                                )
+                                if decision.is_excluded:
                                     total_skipped += 1
+                                    logger.debug(
+                                        "apply_skip reason=%s mode=%s vacancy_id=%s matched_term=%s term_len_bucket=%s",
+                                        decision.reason,
+                                        decision.mode,
+                                        vacancy_id,
+                                        decision.matched_term,
+                                        decision.term_len_bucket,
+                                    )
                                     continue
 
                                 msg = ""
@@ -127,6 +166,12 @@ class ApplyService(BaseService):
                             except ApiError as ex:
                                 logger.warning("Apply error: %s", ex)
                                 total_skipped += 1
+                                logger.debug(
+                                    "apply_skip reason=%s mode=%s vacancy_id=%s",
+                                    "api_error",
+                                    mode,
+                                    vacancy_id,
+                                )
 
                         if page >= res.get("pages", 1) - 1:
                             break
@@ -137,21 +182,3 @@ class ApplyService(BaseService):
             await self._run_exclusive_heavy("apply", user_id, _run)
         except OperationInProgressError:
             await callback("⚠️ Рассылка уже выполняется для этого пользователя.")
-
-
-def _parse_excluded(terms: str | None) -> list[str]:
-    if not terms:
-        return []
-    return [x.strip().lower() for x in terms.split(",") if x.strip()]
-
-
-def _is_excluded(vacancy: dict, excluded: list[str]) -> bool:
-    if not excluded:
-        return False
-    snippet = vacancy.get("snippet") or {}
-    combined = " ".join([
-        vacancy.get("name") or "",
-        snippet.get("requirement") or "",
-        snippet.get("responsibility") or "",
-    ]).lower()
-    return any(term in combined for term in excluded)

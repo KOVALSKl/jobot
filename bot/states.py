@@ -12,6 +12,8 @@ class AuthStates(StatesGroup):
 class ApplyStates(StatesGroup):
     waiting_for_search = State()
     waiting_for_excluded = State()
+    waiting_for_exclude_mode = State()
+    waiting_for_partial_confirm = State()
     waiting_for_message = State()
     confirm = State()
 

@@ -26,11 +26,13 @@ class _FakeApplyService:
         callback,
         search: str | None = None,
         excluded_terms: str | None = None,
+        exclude_mode: str | None = None,
         message_template: str | None = None,
     ) -> None:
         del user_id
         del search
         del excluded_terms
+        del exclude_mode
         del message_template
         await callback("progress-step")
 

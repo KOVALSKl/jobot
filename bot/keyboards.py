@@ -85,6 +85,26 @@ def apply_confirm(search: str | None = None, excluded: str | None = None) -> Inl
     )
 
 
+def apply_exclude_mode() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🛡 Safe (по умолчанию)", callback_data="apply_mode_default_safe")],
+            [InlineKeyboardButton(text="⚡ Partial (агрессивный)", callback_data="apply_mode_partial_aggressive")],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")],
+        ]
+    )
+
+
+def apply_partial_risk_confirm() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⚠️ Понимаю риск, продолжить", callback_data="apply_partial_risk_yes")],
+            [InlineKeyboardButton(text="🔙 Вернуться к выбору режима", callback_data="apply_partial_risk_back")],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")],
+        ]
+    )
+
+
 def clear_options() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
